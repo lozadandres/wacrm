@@ -1,9 +1,10 @@
 "use client";
 
 import type { Deal, PipelineStage } from "@/types";
-import { Calendar, Check, X } from "lucide-react";
+import { Calendar, Check, Clock3, X } from "lucide-react";
 import { formatCurrency } from "@/lib/currency";
 import { useTranslations } from "next-intl";
+import { useEffect, useState } from "react";
 
 interface DealCardProps {
   deal: Deal;
@@ -26,10 +27,27 @@ function initials(name?: string, fallback?: string) {
   return source.charAt(0).toUpperCase();
 }
 
+function timeInStage(enteredAt: string | undefined, now: number) {
+  if (!enteredAt || now === 0) return null;
+  const seconds = Math.max(0, Math.floor((now - new Date(enteredAt).getTime()) / 1000));
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min`;
+  const hours = Math.floor(seconds / 3600);
+  if (hours < 48) return `${hours} h`;
+  return `${Math.floor(hours / 24)} d`;
+}
+
 export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
   const t = useTranslations("Pipelines.card");
   const contactLabel = deal.contact?.name || deal.contact?.phone || t("noContact");
   const assigneeLabel = deal.assignee?.full_name || null;
+  const [clock, setClock] = useState(0);
+  useEffect(() => {
+    const updateClock = () => setClock(Date.now());
+    updateClock();
+    const timer = window.setInterval(updateClock, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const stageAge = timeInStage(deal.stage_entered_at, clock);
 
   return (
     <button
@@ -91,6 +109,13 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
           </span>
         )}
       </div>
+
+      {stageAge && (
+        <div className="mt-2 flex items-center gap-1 text-[11px] text-muted-foreground">
+          <Clock3 className="h-3 w-3" />
+          <span>{stageAge} en esta fase</span>
+        </div>
+      )}
 
       {assigneeLabel && (
         <div className="mt-2 flex items-center justify-end">

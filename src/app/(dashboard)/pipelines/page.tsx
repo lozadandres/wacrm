@@ -30,6 +30,8 @@ import { useCan } from "@/hooks/use-can";
 import { useAuth } from "@/hooks/use-auth";
 import { GatedButton } from "@/components/ui/gated-button";
 import { useTranslations } from "next-intl";
+import { BoardFilters } from "@/components/pipelines/board-filters";
+import { useAppSelector } from "@/store/hooks";
 
 // Pipeline creation is admin-class (settings-tier write under
 // the new RLS); deal creation is operational and only requires
@@ -38,11 +40,20 @@ import { useTranslations } from "next-intl";
 
 // Spec-defined seed — name and color per the product spec.
 const SPEC_DEFAULT_STAGES = [
-  { name: "New Lead", color: "#3b82f6", position: 0 }, // blue
-  { name: "Qualified", color: "#eab308", position: 1 }, // yellow
-  { name: "Proposal Sent", color: "#f97316", position: 2 }, // orange
-  { name: "Negotiation", color: "#8b5cf6", position: 3 }, // purple
-  { name: "Won", color: "#22c55e", position: 4 }, // green
+  { name: "Lead nuevo", color: "#3b82f6", position: 0 },
+  { name: "En conversación", color: "#06b6d4", position: 1 },
+  { name: "Datos incompletos", color: "#eab308", position: 2 },
+  { name: "Validación de dirección", color: "#f97316", position: 3 },
+  { name: "Esperando confirmación", color: "#8b5cf6", position: 4 },
+  { name: "Confirmado por cliente", color: "#22c55e", position: 5 },
+  { name: "En cola para Dropi", color: "#64748b", position: 6 },
+  { name: "Procesando en Dropi", color: "#0ea5e9", position: 7 },
+  { name: "Guía generada", color: "#14b8a6", position: 8 },
+  { name: "En tránsito", color: "#6366f1", position: 9 },
+  { name: "Novedad logística", color: "#ef4444", position: 10 },
+  { name: "Entregado", color: "#16a34a", position: 11 },
+  { name: "Recaudo conciliado", color: "#15803d", position: 12 },
+  { name: "Devuelto o cancelado", color: "#991b1b", position: 13 },
 ];
 
 export default function PipelinesPage() {
@@ -57,6 +68,16 @@ export default function PipelinesPage() {
   const [stages, setStages] = useState<PipelineStage[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [clock, setClock] = useState(0);
+  const boardFilters = useAppSelector((state) => state.crm);
+
+  useEffect(() => {
+    if (boardFilters.priorityFilter !== "overdue") return;
+    const updateClock = () => setClock(Date.now());
+    updateClock();
+    const timer = window.setInterval(updateClock, 60_000);
+    return () => window.clearInterval(timer);
+  }, [boardFilters.priorityFilter]);
 
   // Dialog / sheet state
   const [newPipelineOpen, setNewPipelineOpen] = useState(false);
@@ -120,7 +141,7 @@ export default function PipelinesPage() {
 
     const { data: pipeline, error } = await supabase
       .from("pipelines")
-      .insert({ user_id: user.id, account_id: accountId, name: "Sales Pipeline" })
+      .insert({ user_id: user.id, account_id: accountId, name: "Ventas contra entrega" })
       .select()
       .single();
 
@@ -177,7 +198,6 @@ export default function PipelinesPage() {
     if (!selectedPipelineId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setStages([]);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDeals([]);
       return;
     }
@@ -296,6 +316,22 @@ export default function PipelinesPage() {
   }
 
   const selectedPipeline = pipelines.find((p) => p.id === selectedPipelineId);
+  const visibleDeals = deals.filter((deal) => {
+    const query = boardFilters.search.trim().toLocaleLowerCase();
+    const matchesSearch =
+      !query ||
+      deal.title.toLocaleLowerCase().includes(query) ||
+      deal.contact?.name?.toLocaleLowerCase().includes(query) ||
+      deal.contact?.phone?.includes(query);
+    const entered = deal.stage_entered_at
+      ? new Date(deal.stage_entered_at).getTime()
+      : new Date(deal.created_at).getTime();
+    const matchesPriority =
+      boardFilters.priorityFilter === "all" ||
+      (boardFilters.priorityFilter === "unassigned" && !deal.assigned_to) ||
+      (boardFilters.priorityFilter === "overdue" && clock - entered >= 86_400_000);
+    return Boolean(matchesSearch && matchesPriority);
+  });
 
   if (loading) {
     return (
@@ -413,9 +449,10 @@ export default function PipelinesPage() {
       ) : (
         <>
           <PipelineAnalytics stages={stages} deals={deals} />
+          <BoardFilters />
           <PipelineBoard
             stages={stages}
-            deals={deals}
+            deals={visibleDeals}
             onDealMoved={handleDealMoved}
             onAddDeal={handleAddDeal}
             onEditDeal={handleEditDeal}

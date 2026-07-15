@@ -373,9 +373,32 @@ export interface Deal {
   status?: DealStatus;
   created_at: string;
   updated_at?: string;
+  /** Timestamp used by the CRM board to display time in the current phase. */
+  stage_entered_at?: string;
   contact?: Contact;
   stage?: PipelineStage;
   assignee?: Profile;
+}
+
+export type DealStageChangeSource =
+  | 'kanban'
+  | 'automation'
+  | 'webhook'
+  | 'openclaw'
+  | 'system';
+
+export interface DealStageHistory {
+  id: string;
+  account_id: string;
+  deal_id: string;
+  from_stage_id: string | null;
+  to_stage_id: string;
+  changed_by_user_id: string | null;
+  entered_at: string;
+  exited_at: string | null;
+  duration_seconds: number | null;
+  source: DealStageChangeSource;
+  created_at: string;
 }
 
 export type BroadcastStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed';

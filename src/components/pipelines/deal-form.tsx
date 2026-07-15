@@ -30,6 +30,7 @@ import {
   MessageSquare,
   DollarSign,
   Loader2,
+  History,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
@@ -70,6 +71,16 @@ export function DealForm({
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [linkedConversation, setLinkedConversation] =
     useState<Conversation | null>(null);
+  const [stageHistory, setStageHistory] = useState<
+    Array<{
+      id: string;
+      from_stage_id: string | null;
+      to_stage_id: string;
+      entered_at: string;
+      duration_seconds: number | null;
+      source: string;
+    }>
+  >([]);
 
   const [saving, setSaving] = useState(false);
   const [statusAction, setStatusAction] = useState<DealStatus | null>(null);
@@ -150,6 +161,26 @@ export function DealForm({
       cancelled = true;
     };
   }, [open, contactId, supabase]);
+
+  useEffect(() => {
+    if (!open || !deal) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setStageHistory([]);
+      return;
+    }
+    let cancelled = false;
+    void supabase
+      .from("deal_stage_history")
+      .select("id, from_stage_id, to_stage_id, entered_at, duration_seconds, source")
+      .eq("deal_id", deal.id)
+      .order("created_at", { ascending: false })
+      .then(({ data }) => {
+        if (!cancelled) setStageHistory((data ?? []) as typeof stageHistory);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, deal, supabase]);
 
   async function handleSave() {
     if (!title.trim() || !contactId || !stageId) {
@@ -375,6 +406,40 @@ export function DealForm({
                 className="min-h-[100px] border-border bg-muted text-foreground"
               />
             </div>
+
+            {deal && (
+              <section className="rounded-lg border border-border bg-muted/30 p-3">
+                <h3 className="flex items-center gap-2 text-sm font-semibold">
+                  <History className="h-4 w-4 text-primary" /> Historial de fases
+                </h3>
+                {stageHistory.length === 0 ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    El historial aparecerá después de aplicar la migración 037.
+                  </p>
+                ) : (
+                  <ol className="mt-3 space-y-3 border-l border-border pl-3">
+                    {stageHistory.map((item) => {
+                      const from = stages.find((stage) => stage.id === item.from_stage_id)?.name;
+                      const to = stages.find((stage) => stage.id === item.to_stage_id)?.name ?? "Fase eliminada";
+                      const hours = item.duration_seconds
+                        ? Math.round((item.duration_seconds / 3600) * 10) / 10
+                        : null;
+                      return (
+                        <li key={item.id} className="text-xs">
+                          <p className="font-medium text-foreground">
+                            {from ? `${from} → ${to}` : `Ingresó a ${to}`}
+                          </p>
+                          <p className="text-muted-foreground">
+                            {new Date(item.entered_at).toLocaleString()} · {item.source}
+                            {hours !== null ? ` · ${hours} h` : ""}
+                          </p>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                )}
+              </section>
+            )}
 
             {deal && (
               <div className="space-y-2 rounded-lg border border-border bg-muted/50 p-3">
