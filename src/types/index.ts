@@ -375,6 +375,8 @@ export interface Deal {
   updated_at?: string;
   /** Timestamp used by the CRM board to display time in the current phase. */
   stage_entered_at?: string;
+  /** Latest structured fields extracted by the bounded commercial agent. */
+  agent_extracted_data?: Record<string, unknown>;
   contact?: Contact;
   stage?: PipelineStage;
   assignee?: Profile;

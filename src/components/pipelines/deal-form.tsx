@@ -85,12 +85,12 @@ export function DealForm({
   const [saving, setSaving] = useState(false);
   const [statusAction, setStatusAction] = useState<DealStatus | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [queueingDropi, setQueueingDropi] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Reset the form fields every time the sheet opens or its input
   // props change. This is a legitimate prop-driven sync; the rule is
   // over-cautious here, hence the block-level disable.
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!open) return;
     setConfirmDelete(false);
@@ -116,7 +116,6 @@ export function DealForm({
       setNotes("");
     }
   }, [open, deal, defaultStageId, stages, defaultCurrency]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Load supporting data once the sheet is open
   useEffect(() => {
@@ -141,7 +140,6 @@ export function DealForm({
   // case runs setLinkedConversation inside the async fetch callback.
   useEffect(() => {
     if (!open || !contactId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLinkedConversation(null);
       return;
     }
@@ -164,7 +162,6 @@ export function DealForm({
 
   useEffect(() => {
     if (!open || !deal) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setStageHistory([]);
       return;
     }
@@ -274,6 +271,36 @@ export function DealForm({
     setConfirmDelete(false);
     onOpenChange(false);
     onSaved();
+  }
+
+  async function handleQueueDropi() {
+    if (!deal) return;
+    setQueueingDropi(true);
+    try {
+      const response = await fetch("/api/integrations/dropi/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          deal_id: deal.id,
+          customer_confirmed: true,
+          requires_human_approval: true,
+        }),
+      });
+      const body = (await response.json()) as { error?: string; missing_fields?: string[] };
+      if (!response.ok) {
+        toast.error(
+          body.missing_fields?.length
+            ? `Faltan datos para Dropi: ${body.missing_fields.join(", ")}`
+            : body.error ?? "No se pudo crear el trabajo de Dropi",
+        );
+        return;
+      }
+      toast.success("Pedido enviado a la cola de OpenClaw");
+      onOpenChange(false);
+      onSaved();
+    } finally {
+      setQueueingDropi(false);
+    }
   }
 
   return (
@@ -487,6 +514,21 @@ export function DealForm({
                     className="w-full text-muted-foreground hover:text-foreground"
                   >
                     {t("reopenDeal")}
+                  </Button>
+                )}
+                {stages.find((item) => item.id === deal.stage_id)?.name ===
+                  "Confirmado por cliente" && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void handleQueueDropi()}
+                    disabled={queueingDropi}
+                    className="w-full border-primary/40 text-primary"
+                  >
+                    {queueingDropi ? (
+                      <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                    ) : null}
+                    Enviar a OpenClaw / Dropi
                   </Button>
                 )}
               </div>

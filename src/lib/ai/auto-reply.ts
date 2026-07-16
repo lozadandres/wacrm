@@ -9,6 +9,8 @@ import { logAiUsage } from './usage'
 import { latestUserMessage } from './query'
 import { engineSendText } from '@/lib/flows/meta-send'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { callCommercialAgent, commercialAgentConfigured } from '@/lib/openclaw/commercial-client'
+import { applyCommercialActions } from '@/lib/openclaw/commercial-actions'
 
 interface DispatchArgs {
   /** Tenancy key — drives config, contact, and whatsapp_config lookups. */
@@ -48,7 +50,9 @@ export async function dispatchInboundToAiReply(
     const db = supabaseAdmin()
 
     const config = await loadAiConfig(db, accountId)
-    if (!config || !config.autoReplyEnabled) return
+    const useOpenClaw = commercialAgentConfigured()
+    if (!useOpenClaw && (!config || !config.autoReplyEnabled)) return
+    const maxReplies = config?.autoReplyMaxPerConversation ?? 20
 
     // Deterministic, user-configured responders win over the LLM — the
     // caller already excludes messages a Flow consumed. Message-level
@@ -77,7 +81,7 @@ export async function dispatchInboundToAiReply(
     if (conv.ai_autoreply_disabled) return // handed off / turned off here
     // Cheap early-out; the authoritative cap check is the atomic claim
     // below (this read can race a concurrent inbound).
-    if (conv.ai_reply_count >= config.autoReplyMaxPerConversation) return
+    if (conv.ai_reply_count >= maxReplies) return
 
     const messages = await buildConversationContext(db, conversationId)
     if (messages.length === 0) return
@@ -97,6 +101,64 @@ export async function dispatchInboundToAiReply(
       )
       return
     }
+
+    if (useOpenClaw) {
+      try {
+        const { data: currentDeal } = await db
+          .from('deals')
+          .select('stage:pipeline_stages(name)')
+          .eq('account_id', accountId)
+          .eq('conversation_id', conversationId)
+          .eq('status', 'open')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        const stage = currentDeal?.stage as unknown as { name?: string } | null
+        const response = await callCommercialAgent({
+          schema_version: '1.0',
+          account_id: accountId,
+          conversation_id: conversationId,
+          contact_id: contactId,
+          messages,
+          current_stage: stage?.name ?? null,
+          allowed_actions: ['REQUEST_STAGE_CHANGE', 'REQUEST_HUMAN_HANDOFF'],
+        })
+        const { handoff } = await applyCommercialActions({
+          db,
+          accountId,
+          conversationId,
+          response,
+        })
+        if (handoff) {
+          await db.from('conversations').update({
+            ai_autoreply_disabled: true,
+            ai_handoff_summary: `OpenClaw solicitó revisión humana. Intención: ${response.intent}`,
+            ...(config?.handoffAgentId ? { assigned_agent_id: config.handoffAgentId } : {}),
+          }).eq('id', conversationId)
+          return
+        }
+        if (!response.reply.text.trim()) return
+        const { data: claimed } = await db.rpc('claim_ai_reply_slot', {
+          conversation_id: conversationId,
+          max_replies: maxReplies,
+        })
+        if (claimed !== true) return
+        await engineSendText({
+          accountId,
+          userId: configOwnerUserId,
+          conversationId,
+          contactId,
+          text: response.reply.text.trim(),
+          aiGenerated: true,
+        })
+        return
+      } catch (openClawError) {
+        console.error('[openclaw commercial] failed; using configured provider fallback:', openClawError)
+        if (!config || !config.autoReplyEnabled) return
+      }
+    }
+
+    if (!config) return
 
     // Ground the reply in the account's knowledge base (best-effort).
     const knowledge = await retrieveKnowledge(
@@ -166,7 +228,7 @@ export async function dispatchInboundToAiReply(
       'claim_ai_reply_slot',
       {
         conversation_id: conversationId,
-        max_replies: config.autoReplyMaxPerConversation,
+        max_replies: maxReplies,
       },
     )
     if (claimErr) {

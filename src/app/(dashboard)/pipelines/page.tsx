@@ -31,6 +31,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { GatedButton } from "@/components/ui/gated-button";
 import { useTranslations } from "next-intl";
 import { BoardFilters } from "@/components/pipelines/board-filters";
+import { IntegrationJobsPanel } from "@/components/pipelines/integration-jobs-panel";
 import { useAppSelector } from "@/store/hooks";
 
 // Pipeline creation is admin-class (settings-tier write under
@@ -449,6 +450,7 @@ export default function PipelinesPage() {
       ) : (
         <>
           <PipelineAnalytics stages={stages} deals={deals} />
+          <IntegrationJobsPanel />
           <BoardFilters />
           <PipelineBoard
             stages={stages}
